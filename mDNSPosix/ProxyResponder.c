@@ -39,6 +39,7 @@
 static mDNS mDNSStorage;       // mDNS core uses this to store its globals
 static mDNS_PlatformSupport PlatformStorage;  // Stores this platform's globals
 mDNSexport const char ProgramName[] = "mDNSProxyResponderPosix";
+static mDNSBool mDNSPTRRecord; // default is to create associated PTR record
 
 //*************************************************************************************************************
 // Proxy Host Registration
@@ -60,7 +61,7 @@ mDNSlocal void HostNameCallback(mDNS *const m, AuthRecord *const rr, mStatus res
     {
         debugf("Host name conflict for %##s", rr->resrec.name->c);
         mDNS_Deregister(m, &f->RR_A);
-        mDNS_Deregister(m, &f->RR_PTR);
+        mDNS_Deregister(m, &f->RR_PTR); // TODO: consider conditional here
         exit(-1);
     }
 }
@@ -84,8 +85,15 @@ mDNSlocal mStatus mDNS_RegisterProxyHost(mDNS *m, ProxyHost *p)
     p->RR_A.resrec.rdata->u.ipv4 = p->ip;
     AssignDomainName(&p->RR_PTR.resrec.rdata->u.name, p->RR_A.resrec.name);
 
+	// fprintf(stderr, "mDNSPTRRecord option is %d\n", mDNSPTRRecord);
+
     mDNS_Register(m, &p->RR_A);
-    mDNS_Register(m, &p->RR_PTR);
+	if (mDNSPTRRecord == mDNStrue) {
+	  mDNS_Register(m, &p->RR_PTR);
+	  debugf("Registering PTR record for %##s", p->RR_A.resrec.name->c);
+	} else {
+	  debugf("Not registering PTR record for %##s", p->RR_A.resrec.name->c);
+	}
 
     debugf("Made Proxy Host Records for %##s", p->RR_A.resrec.name->c);
 
@@ -266,6 +274,16 @@ mDNSexport int main(int argc, char **argv)
 
         MakeDomainLabelFromLiteralString(&proxyhost.hostlabel, argv[2]);
 
+		// check last cmd line option if we have more than 2 options
+		if (argc >=3) {
+		  if (!strcmp(argv[argc-1], "noptr")) {
+			// fprintf(stderr, "%s option requested\n", argv[argc-1]);
+			mDNSPTRRecord = mDNSfalse;
+		  } else {
+			mDNSPTRRecord = mDNStrue;
+		  }
+		}
+
         mDNS_RegisterProxyHost(&mDNSStorage, &proxyhost);
 
         if (argc >=6)
@@ -286,13 +304,14 @@ mDNSexport int main(int argc, char **argv)
     return(0);
 
 usage:
-    fprintf(stderr, "%s ip hostlabel [srvname srvtype port txt [txt ...]]\n", argv[0]);
+    fprintf(stderr, "%s ip hostlabel [srvname srvtype port txt [txt ...]] [noptr]\n", argv[0]);
     fprintf(stderr, "ip        Real IP address (or valid host name) of the host where the service actually resides\n");
     fprintf(stderr, "hostlabel First label of the dot-local host name to create for this host, e.g. \"foo\" for \"foo.local.\"\n");
     fprintf(stderr, "srvname   Descriptive name of service, e.g. \"Stuart's Ink Jet Printer\"\n");
     fprintf(stderr, "srvtype   IANA service type, e.g. \"_ipp._tcp\" or \"_ssh._tcp\", etc.\n");
     fprintf(stderr, "port      Port number where the service resides (1-65535)\n");
     fprintf(stderr, "txt       Additional name/value pairs specified in service definition, e.g. \"pdl=application/postscript\"\n");
+    fprintf(stderr, "noptr     Don't create an associated PTR record\n");
     fprintf(stderr, "e.g. %s 169.254.12.34 thehost                                (just create a dot-local host name)\n", argv[0]);
     fprintf(stderr, "or   %s 169.254.12.34 thehost \"My Printer\" _printer._tcp. 515 rp=lpt1 pdl=application/postscript\n", argv[0]);
     fprintf(stderr, "or   %s -             thehost \"My Printer\" _printer._tcp.           (assertion of non-existence)\n", argv[0]);
